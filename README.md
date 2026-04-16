@@ -27,10 +27,10 @@ playwright install chromium
 ### 2. 开始抓取！
 在终端中启动主程序，并在提示处输入你需要下载的主页链接即可：
 ```bash
-python scraper.py
+python douyin_user_downloader.py
 ```
 > 或者直接附带链接运行：
-> `python scraper.py "https://www.douyin.com/user/xxxxxx"`
+> `python douyin_user_downloader.py "https://www.douyin.com/user/xxxxxx"`
 
 ### 3. 数据去哪里了？
 抓取下来极度干净的高清图片、无水印视频将会根据作者的名字自动分类归档存放在你脚本同目录下的 `downloads/作者名/` 专用文件夹中！
