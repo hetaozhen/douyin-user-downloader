@@ -10,9 +10,3 @@ downloads/
 
 # Log Files
 failed_downloads.txt
-
-# Temporary test scripts
-test_scroll.py
-test_video.py
-test_video2.py
-douyin_debug.json
