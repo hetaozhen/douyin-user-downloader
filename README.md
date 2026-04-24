@@ -1,6 +1,9 @@
 # Douyin User Downloader  
 **抖音用户主页批量无水印下载器**
 
+[English version](README_EN.md) | 简体中文
+
+
 基于强大的 Playwright 和 Python 打造的自动化数据采集工具。它可以全自动、无感地批量抓取并下载指定抖音用户主页的**所有视频**和**所有图文作品**。
 
 ---
