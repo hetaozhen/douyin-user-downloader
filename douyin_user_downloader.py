@@ -3,6 +3,7 @@ import re
 import requests
 from playwright.sync_api import sync_playwright
 import time
+import datetime
 import concurrent.futures
 
 # 初始化全局线程池，最大并发下载数可根据需求调整
@@ -10,6 +11,40 @@ executor = concurrent.futures.ThreadPoolExecutor(max_workers=5)
 
 # 记录最近一次抓取到新数据的时间
 last_data_time = time.time()
+
+# 全局筛选配置变量
+FILTER_KEYWORD = ""
+START_DATETIME = None
+END_DATETIME = None
+
+def parse_datetime_input(input_str, is_end=False):
+    input_str = input_str.strip()
+    if not input_str:
+        return None
+    
+    # 尝试解析多种常见格式
+    formats = [
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d",
+        "%Y/%m/%d %H:%M:%S",
+        "%Y/%m/%d %H:%M",
+        "%Y/%m/%d",
+        "%Y%m%d"
+    ]
+    
+    for fmt in formats:
+        try:
+            dt = datetime.datetime.strptime(input_str, fmt)
+            # 如果只输入了日期，且是结束时间，将其设置为当天的 23:59:59
+            if fmt in ["%Y-%m-%d", "%Y/%m/%d", "%Y%m%d"] and is_end:
+                dt = dt.replace(hour=23, minute=59, second=59)
+            return dt
+        except ValueError:
+            continue
+            
+    print(f"⚠️ 无法解析时间格式 '{input_str}'，该过滤条件将不生效。建议使用 YYYY-MM-DD 格式。")
+    return None
 
 DOWNLOAD_DIR = "downloads"
 
@@ -76,17 +111,44 @@ def handle_response(response):
                     if not os.path.exists(user_dir):
                         os.makedirs(user_dir)
 
-                    # 获取标题、唯一ID，并进行清洗截断
+                    # 获取标题与发布时间
                     raw_desc = item.get("desc", "无标题")
-                    aweme_id = str(item.get("aweme_id", "未知ID"))
+                    create_time_raw = item.get("create_time")
                     
+                    # 1. 关键字过滤 (模糊匹配，不区分大小写)
+                    if FILTER_KEYWORD and FILTER_KEYWORD.lower() not in raw_desc.lower():
+                        continue
+                        
+                    # 2. 时间过滤
+                    pub_time = None
+                    if create_time_raw:
+                        try:
+                            pub_time = datetime.datetime.fromtimestamp(create_time_raw)
+                        except Exception:
+                            pass
+                            
+                    if START_DATETIME or END_DATETIME:
+                        if not pub_time:
+                            continue  # 如果无法获取发布时间，则过滤掉该作品
+                        if START_DATETIME and pub_time < START_DATETIME:
+                            continue
+                        if END_DATETIME and pub_time > END_DATETIME:
+                            continue
+                            
+                    # 获取清洗后的标题
                     clean_desc = sanitize_filename(raw_desc)
                     if not clean_desc:
                         clean_desc = "无标题"
                     clean_desc = clean_desc[:40] 
                     
-                    # 组合成带唯一标识的文件名：标题_ID（去除括号）
-                    desc = f"{clean_desc}_{aweme_id}"
+                    # 转换发布时间字符串用于文件名 (例如 YYYYMMDD_HHMMSS)
+                    if pub_time:
+                        time_str = pub_time.strftime("%Y%m%d_%H%M%S")
+                    else:
+                        time_str = "未知时间"
+                        
+                    # 新的文件名格式：[发布时间]_[标题]
+                    desc = f"{time_str}_{clean_desc}"
 
                     # 1. 如果是图文
                     if item.get("images"):
@@ -144,7 +206,22 @@ def main():
         print("未输入有效链接，程序退出。")
         return
         
-    print(f"准备爬取主页: {target_url}")
+    global FILTER_KEYWORD, START_DATETIME, END_DATETIME
+    
+    FILTER_KEYWORD = input("请输入筛选关键字 (仅下载包含该关键字的作品，直接回车不过滤): ").strip()
+    
+    start_str = input("请输入开始日期时间 (格式: YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS，直接回车不限制): ").strip()
+    START_DATETIME = parse_datetime_input(start_str, is_end=False)
+    
+    end_str = input("请输入结束日期时间 (格式: YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS，直接回车不限制): ").strip()
+    END_DATETIME = parse_datetime_input(end_str, is_end=True)
+    
+    print(f"\n准备爬取主页: {target_url}")
+    print("--------------------------------------------------")
+    print("[当前设置的过滤条件]")
+    print(f"  - 关键字: {FILTER_KEYWORD if FILTER_KEYWORD else '无'}")
+    print(f"  - 开始时间: {START_DATETIME if START_DATETIME else '无'}")
+    print(f"  - 结束时间: {END_DATETIME if END_DATETIME else '无'}")
     print("--------------------------------------------------")
     print("提示：浏览器弹出后：\n1. 如果出现验证码，需手动通过。\n2. 下载的数据将保存在脚本所在目录下的 downloads 文件夹。")
     print("--------------------------------------------------")
