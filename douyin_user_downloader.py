@@ -407,7 +407,10 @@ def main():
                 break
         
         # 退出循环后关闭 context
-        context.close()
+        try:
+            context.close()
+        except Exception:
+            pass
         
     # 关闭全局线程池
     executor.shutdown(wait=True)
