@@ -153,7 +153,7 @@ def process_aweme_item(item, is_single=False):
                     future = executor.submit(download_file, img_url, filepath)
                     active_futures.append(future)
                 else:
-                    pass # 已存在则跳过
+                    print(f"  [跳过] 图片已存在: {filename}")
 
     # 2. 如果是视频
     elif item.get("video"):
@@ -187,7 +187,7 @@ def process_aweme_item(item, is_single=False):
                 future = executor.submit(download_file, video_url, filepath)
                 active_futures.append(future)
             else:
-                pass # 已存在则跳过
+                print(f"  [跳过] 视频已存在: {filename}")
 
 def handle_response(response):
     global last_data_time
