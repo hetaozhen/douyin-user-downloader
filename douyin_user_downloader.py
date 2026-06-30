@@ -157,10 +157,30 @@ def process_aweme_item(item, is_single=False):
 
     # 2. 如果是视频
     elif item.get("video"):
-        play_addr = item["video"].get("play_addr", {}).get("url_list", [])
-        if play_addr:
-            video_url = play_addr[0]
-            print(f"发现视频: {desc}")
+        video_url = None
+        bit_rate_list = item["video"].get("bit_rate")
+        if bit_rate_list and isinstance(bit_rate_list, list):
+            # 过滤出含有有效播放地址的项，并按 bit_rate 降序排列
+            valid_rates = []
+            for r in bit_rate_list:
+                if isinstance(r, dict) and r.get("play_addr", {}).get("url_list"):
+                    valid_rates.append(r)
+            if valid_rates:
+                valid_rates.sort(key=lambda x: x.get("bit_rate", 0), reverse=True)
+                highest_rate_item = valid_rates[0]
+                video_url = highest_rate_item["play_addr"]["url_list"][0]
+                gear = highest_rate_item.get("gear_name", "unknown")
+                rate_val = highest_rate_item.get("bit_rate", 0)
+                print(f"发现视频: {desc} | [最高画质] 档位: {gear} (码率: {rate_val})")
+        
+        # 回退至默认播放地址
+        if not video_url:
+            play_addr = item["video"].get("play_addr", {}).get("url_list", [])
+            if play_addr:
+                video_url = play_addr[0]
+                print(f"发现视频 (默认画质): {desc}")
+
+        if video_url:
             filename = f"{desc}.mp4"
             filepath = os.path.join(user_dir, filename)
             if not os.path.exists(filepath):
