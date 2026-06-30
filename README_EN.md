@@ -11,8 +11,11 @@ An automated data collection tool built on the powerful Playwright and Python en
 ## 🌟 Key Features
 
 - **Bypass CDN Hotlinking Restrictions**: Perfectly emulates authentic Chrome browser behavior, including core authentication headers (`User-Agent` and `Referer`), effectively resolving `403 Forbidden` errors encountered when accessing direct video streams.
-- **Smart Virtual List Scrolling**: Moves beyond unreliable DOM height detection. By injecting physical `Mouse Wheel` events and `Targeted JS Scrolling` directly into the container, it triggers Douyin's most aggressive dynamic loading, ensuring 100% rendering of all content.
+- **Smart Virtual List Scrolling**: Designed for user homepage batch scraping. By injecting physical `Mouse Wheel` events and `Targeted JS Scrolling` directly into the container, it triggers Douyin's dynamic loading, ensuring 100% rendering of all content.
 - **Low-Level Network Stream Monitoring**: Listens directly to the `/aweme/v1/web/aweme/post/` API packets. It ignores frontend UI lag, gracefully concluding the task only after 15 seconds of zero incoming data packets, ensuring no video is ever missed.
+- **Smart Single Video / Homepage Routing**: Allows pasting raw text containing a single video share link. The app extracts the URL using `https?://[^\s]+` and automatically routes to single video mode or batch homepage mode. Single video mode downloads the video immediately and exits without scrolling.
+- **Multi-Dimensional Filters**: Prompts for interactive filter criteria after entering the link. You can filter by **keyword**, **start date**, and **end date** (press Enter to skip filters).
+- **Date-Based Naming Format**: Replaces the bulky work ID at the end of filenames with a publication date-time prefix in `[YYYYMMDD_HHMMSS]_[Title]` format.
 - **Persistent Session Protection (Stealth Mode)**: Supports persistent Cookie storage. After the initial login, the tool defaults to a "Stealth Mode" (`Headless Mode`) for background execution. If a rare anti-bot slider captcha appears, the window can be instantly toggled for manual resolution.
 - **Extreme Concurrency & Intelligent Retries**: Features a high-efficiency thread pool module. In cases of packet loss or rate-limiting, it automatically waits and retries after 2 seconds, ensuring reliability even in harsh network conditions.
 

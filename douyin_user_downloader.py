@@ -95,6 +95,80 @@ def download_file(url, filepath):
                 print(f"  [彻底失败] 达到最大重试次数，仍报错: {e}")
                 log_failed_download(url, filepath, str(e))
 
+def process_aweme_item(item):
+    # 动态获取作者名字用来创建文件夹
+    author_name = item.get("author", {}).get("nickname", "未知用户")
+    author_name = sanitize_filename(author_name)
+    user_dir = os.path.join(DOWNLOAD_DIR, author_name)
+    if not os.path.exists(user_dir):
+        os.makedirs(user_dir)
+
+    # 获取标题与发布时间
+    raw_desc = item.get("desc", "无标题")
+    create_time_raw = item.get("create_time")
+    
+    # 1. 关键字过滤 (模糊匹配，不区分大小写)
+    if FILTER_KEYWORD and FILTER_KEYWORD.lower() not in raw_desc.lower():
+        return
+        
+    # 2. 时间过滤
+    pub_time = None
+    if create_time_raw:
+        try:
+            pub_time = datetime.datetime.fromtimestamp(create_time_raw)
+        except Exception:
+            pass
+            
+    if START_DATETIME or END_DATETIME:
+        if not pub_time:
+            return  # 如果无法获取发布时间，则过滤掉该作品
+        if START_DATETIME and pub_time < START_DATETIME:
+            return
+        if END_DATETIME and pub_time > END_DATETIME:
+            return
+            
+    # 获取清洗后的标题
+    clean_desc = sanitize_filename(raw_desc)
+    if not clean_desc:
+        clean_desc = "无标题"
+    clean_desc = clean_desc[:40] 
+    
+    # 转换发布时间字符串用于文件名 (例如 YYYYMMDD_HHMMSS)
+    if pub_time:
+        time_str = pub_time.strftime("%Y%m%d_%H%M%S")
+    else:
+        time_str = "未知时间"
+        
+    # 新的文件名格式：[发布时间]_[标题]
+    desc = f"{time_str}_{clean_desc}"
+
+    # 1. 如果是图文
+    if item.get("images"):
+        print(f"发现图文: {desc} (共 {len(item['images'])} 张)")
+        for idx, img in enumerate(item['images']):
+            url_list = img.get("url_list", [])
+            if url_list:
+                img_url = url_list[0]
+                filename = f"{desc}_{idx+1}.jpeg"
+                filepath = os.path.join(user_dir, filename)
+                if not os.path.exists(filepath):
+                    executor.submit(download_file, img_url, filepath)
+                else:
+                    pass # 已存在则跳过
+
+    # 2. 如果是视频
+    elif item.get("video"):
+        play_addr = item["video"].get("play_addr", {}).get("url_list", [])
+        if play_addr:
+            video_url = play_addr[0]
+            print(f"发现视频: {desc}")
+            filename = f"{desc}.mp4"
+            filepath = os.path.join(user_dir, filename)
+            if not os.path.exists(filepath):
+                executor.submit(download_file, video_url, filepath)
+            else:
+                pass # 已存在则跳过
+
 def handle_response(response):
     global last_data_time
     # 过滤并且只处理包含作品列表的接口请求
@@ -104,78 +178,7 @@ def handle_response(response):
             if "aweme_list" in data and len(data["aweme_list"]) > 0:
                 last_data_time = time.time()  # 只要还有新数据，就刷新时间
                 for item in data["aweme_list"]:
-                    # 动态获取作者名字用来创建文件夹
-                    author_name = item.get("author", {}).get("nickname", "未知用户")
-                    author_name = sanitize_filename(author_name)
-                    user_dir = os.path.join(DOWNLOAD_DIR, author_name)
-                    if not os.path.exists(user_dir):
-                        os.makedirs(user_dir)
-
-                    # 获取标题与发布时间
-                    raw_desc = item.get("desc", "无标题")
-                    create_time_raw = item.get("create_time")
-                    
-                    # 1. 关键字过滤 (模糊匹配，不区分大小写)
-                    if FILTER_KEYWORD and FILTER_KEYWORD.lower() not in raw_desc.lower():
-                        continue
-                        
-                    # 2. 时间过滤
-                    pub_time = None
-                    if create_time_raw:
-                        try:
-                            pub_time = datetime.datetime.fromtimestamp(create_time_raw)
-                        except Exception:
-                            pass
-                            
-                    if START_DATETIME or END_DATETIME:
-                        if not pub_time:
-                            continue  # 如果无法获取发布时间，则过滤掉该作品
-                        if START_DATETIME and pub_time < START_DATETIME:
-                            continue
-                        if END_DATETIME and pub_time > END_DATETIME:
-                            continue
-                            
-                    # 获取清洗后的标题
-                    clean_desc = sanitize_filename(raw_desc)
-                    if not clean_desc:
-                        clean_desc = "无标题"
-                    clean_desc = clean_desc[:40] 
-                    
-                    # 转换发布时间字符串用于文件名 (例如 YYYYMMDD_HHMMSS)
-                    if pub_time:
-                        time_str = pub_time.strftime("%Y%m%d_%H%M%S")
-                    else:
-                        time_str = "未知时间"
-                        
-                    # 新的文件名格式：[发布时间]_[标题]
-                    desc = f"{time_str}_{clean_desc}"
-
-                    # 1. 如果是图文
-                    if item.get("images"):
-                        print(f"发现图文: {desc} (共 {len(item['images'])} 张)")
-                        for idx, img in enumerate(item['images']):
-                            url_list = img.get("url_list", [])
-                            if url_list:
-                                img_url = url_list[0]
-                                filename = f"{desc}_{idx+1}.jpeg"
-                                filepath = os.path.join(user_dir, filename)
-                                if not os.path.exists(filepath):
-                                    executor.submit(download_file, img_url, filepath)
-                                else:
-                                    pass # 已存在则跳过
-
-                    # 2. 如果是视频
-                    elif item.get("video"):
-                        play_addr = item["video"].get("play_addr", {}).get("url_list", [])
-                        if play_addr:
-                            video_url = play_addr[0]
-                            print(f"发现视频: {desc}")
-                            filename = f"{desc}.mp4"
-                            filepath = os.path.join(user_dir, filename)
-                            if not os.path.exists(filepath):
-                                executor.submit(download_file, video_url, filepath)
-                            else:
-                                pass # 已存在则跳过
+                    process_aweme_item(item)
         except Exception as e:
             # 抓取数据解析出错不影响主流程
             pass
@@ -197,13 +200,23 @@ def is_logged_in(user_data_dir):
     return False
 
 def main():
+    if sys.stdout.encoding != 'utf-8':
+        sys.stdout.reconfigure(encoding='utf-8')
+        
     if len(sys.argv) > 1:
-        target_url = sys.argv[1]
+        raw_input_text = sys.argv[1]
     else:
-        target_url = input("请输入你想爬取的抖音主页链接 (例如 https://www.douyin.com/user/...): ").strip()
+        raw_input_text = input("请输入你想爬取的抖音主页链接或包含单视频链接的文本: ").strip()
+        
+    # 从文本中提取 URL
+    match = re.search(r'https?://[^\s]+', raw_input_text)
+    if match:
+        target_url = match.group(0)
+    else:
+        target_url = ""
         
     if not target_url:
-        print("未输入有效链接，程序退出。")
+        print("未从输入中提取到有效链接，程序退出。")
         return
         
     global FILTER_KEYWORD, START_DATETIME, END_DATETIME
@@ -254,10 +267,35 @@ def main():
         except Exception as e:
             print(f"⚠️ 页面加载提示（不影响抓取）: {e}")
             
-        print("\n等待 8 秒，请确保页面已加载完毕...")
-        time.sleep(8)
+        print("\n等待页面加载...")
+        time.sleep(5)
         
-        print("\n准备开始全自动向下滚动...")
+        # 判断是否跳转到了单视频页面
+        if "/video/" in page.url:
+            print("检测到单视频详情页，尝试直接获取视频数据...")
+            match = re.search(r'/video/(\d+)', page.url)
+            if match:
+                aweme_id = match.group(1)
+                try:
+                    data = page.evaluate(f"""async () => {{
+                        const res = await fetch('/aweme/v1/web/aweme/detail/?device_platform=webapp&aid=6383&channel=channel_pc_web&aweme_id={aweme_id}');
+                        return await res.json();
+                    }}""")
+                    if data and "aweme_detail" in data:
+                        process_aweme_item(data["aweme_detail"])
+                    else:
+                        print("未找到 aweme_detail 数据。")
+                except Exception as e:
+                    print(f"获取单视频数据失败: {e}")
+            else:
+                print("无法从 URL 提取视频 ID。")
+            
+            context.close()
+            executor.shutdown(wait=True)
+            print("单视频抓取任务结束！")
+            return
+            
+        print("\n未检测到单视频页，准备开始全自动向下滚动主页...")
         global last_data_time
         last_data_time = time.time()  # 开始滚动前重置一次时间
         scroll_count = 0
