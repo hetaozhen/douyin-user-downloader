@@ -95,7 +95,7 @@ def download_file(url, filepath):
                 print(f"  [彻底失败] 达到最大重试次数，仍报错: {e}")
                 log_failed_download(url, filepath, str(e))
 
-def process_aweme_item(item):
+def process_aweme_item(item, is_single=False):
     # 动态获取作者名字用来创建文件夹
     author_name = item.get("author", {}).get("nickname", "未知用户")
     author_name = sanitize_filename(author_name)
@@ -108,7 +108,7 @@ def process_aweme_item(item):
     create_time_raw = item.get("create_time")
     
     # 1. 关键字过滤 (模糊匹配，不区分大小写)
-    if FILTER_KEYWORD and FILTER_KEYWORD.lower() not in raw_desc.lower():
+    if not is_single and FILTER_KEYWORD and FILTER_KEYWORD.lower() not in raw_desc.lower():
         return
         
     # 2. 时间过滤
@@ -119,7 +119,7 @@ def process_aweme_item(item):
         except Exception:
             pass
             
-    if START_DATETIME or END_DATETIME:
+    if not is_single and (START_DATETIME or END_DATETIME):
         if not pub_time:
             return  # 如果无法获取发布时间，则过滤掉该作品
         if START_DATETIME and pub_time < START_DATETIME:
@@ -219,25 +219,6 @@ def main():
         print("未从输入中提取到有效链接，程序退出。")
         return
         
-    global FILTER_KEYWORD, START_DATETIME, END_DATETIME
-    
-    FILTER_KEYWORD = input("请输入筛选关键字 (仅下载包含该关键字的作品，直接回车不过滤): ").strip()
-    
-    start_str = input("请输入开始日期时间 (格式: YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS，直接回车不限制): ").strip()
-    START_DATETIME = parse_datetime_input(start_str, is_end=False)
-    
-    end_str = input("请输入结束日期时间 (格式: YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS，直接回车不限制): ").strip()
-    END_DATETIME = parse_datetime_input(end_str, is_end=True)
-    
-    print(f"\n准备爬取主页: {target_url}")
-    print("--------------------------------------------------")
-    print("[当前设置的过滤条件]")
-    print(f"  - 关键字: {FILTER_KEYWORD if FILTER_KEYWORD else '无'}")
-    print(f"  - 开始时间: {START_DATETIME if START_DATETIME else '无'}")
-    print(f"  - 结束时间: {END_DATETIME if END_DATETIME else '无'}")
-    print("--------------------------------------------------")
-    print("提示：浏览器弹出后：\n1. 如果出现验证码，需手动通过。\n2. 下载的数据将保存在脚本所在目录下的 downloads 文件夹。")
-    print("--------------------------------------------------")
     user_data_dir = os.path.join(os.getcwd(), 'browser_data')
     # 智能检查登录状态
     run_headless = is_logged_in(user_data_dir)
@@ -271,9 +252,9 @@ def main():
         time.sleep(5)
         
         # 判断是否跳转到了单视频页面
-        if "/video/" in page.url:
-            print("检测到单视频详情页，尝试直接获取视频数据...")
-            match = re.search(r'/video/(\d+)', page.url)
+        if "/video/" in page.url or "/note/" in page.url:
+            print("检测到单视频详情页，直接下载作品...")
+            match = re.search(r'/(?:video|note)/(\d+)', page.url)
             if match:
                 aweme_id = match.group(1)
                 try:
@@ -282,7 +263,7 @@ def main():
                         return await res.json();
                     }}""")
                     if data and "aweme_detail" in data:
-                        process_aweme_item(data["aweme_detail"])
+                        process_aweme_item(data["aweme_detail"], is_single=True)
                     else:
                         print("未找到 aweme_detail 数据。")
                 except Exception as e:
@@ -295,7 +276,24 @@ def main():
             print("单视频抓取任务结束！")
             return
             
-        print("\n未检测到单视频页，准备开始全自动向下滚动主页...")
+        print("\n检测到主页链接，开始配置筛选条件...")
+        global FILTER_KEYWORD, START_DATETIME, END_DATETIME
+        
+        FILTER_KEYWORD = input("请输入筛选关键字 (仅下载包含该关键字的作品，直接回车不过滤): ").strip()
+        
+        start_str = input("请输入开始日期时间 (格式: YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS，直接回车不限制): ").strip()
+        START_DATETIME = parse_datetime_input(start_str, is_end=False)
+        
+        end_str = input("请输入结束日期时间 (格式: YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS，直接回车不限制): ").strip()
+        END_DATETIME = parse_datetime_input(end_str, is_end=True)
+        
+        print(f"\n准备开始全自动向下滚动主页: {target_url}")
+        print("--------------------------------------------------")
+        print("[当前设置的过滤条件]")
+        print(f"  - 关键字: {FILTER_KEYWORD if FILTER_KEYWORD else '无'}")
+        print(f"  - 开始时间: {START_DATETIME if START_DATETIME else '无'}")
+        print(f"  - 结束时间: {END_DATETIME if END_DATETIME else '无'}")
+        print("--------------------------------------------------")
         global last_data_time
         last_data_time = time.time()  # 开始滚动前重置一次时间
         scroll_count = 0
