@@ -17,6 +17,9 @@ FILTER_KEYWORD = ""
 START_DATETIME = None
 END_DATETIME = None
 
+# 全局下载任务跟踪器列表
+active_futures = []
+
 def parse_datetime_input(input_str, is_end=False):
     input_str = input_str.strip()
     if not input_str:
@@ -45,11 +48,6 @@ def parse_datetime_input(input_str, is_end=False):
             
     print(f"⚠️ 无法解析时间格式 '{input_str}'，该过滤条件将不生效。建议使用 YYYY-MM-DD 格式。")
     return None
-
-DOWNLOAD_DIR = "downloads"
-
-if not os.path.exists(DOWNLOAD_DIR):
-    os.makedirs(DOWNLOAD_DIR)
 
 def sanitize_filename(name):
     # 移除 Windows 下不合法的文件名字符，包括换行符 \n \r
@@ -152,7 +150,8 @@ def process_aweme_item(item, is_single=False):
                 filename = f"{desc}_{idx+1}.jpeg"
                 filepath = os.path.join(user_dir, filename)
                 if not os.path.exists(filepath):
-                    executor.submit(download_file, img_url, filepath)
+                    future = executor.submit(download_file, img_url, filepath)
+                    active_futures.append(future)
                 else:
                     pass # 已存在则跳过
 
@@ -165,7 +164,8 @@ def process_aweme_item(item, is_single=False):
             filename = f"{desc}.mp4"
             filepath = os.path.join(user_dir, filename)
             if not os.path.exists(filepath):
-                executor.submit(download_file, video_url, filepath)
+                future = executor.submit(download_file, video_url, filepath)
+                active_futures.append(future)
             else:
                 pass # 已存在则跳过
 
@@ -203,22 +203,6 @@ def main():
     if sys.stdout.encoding != 'utf-8':
         sys.stdout.reconfigure(encoding='utf-8')
         
-    if len(sys.argv) > 1:
-        raw_input_text = sys.argv[1]
-    else:
-        raw_input_text = input("请输入你想爬取的抖音主页链接或包含单视频链接的文本: ").strip()
-        
-    # 从文本中提取 URL
-    match = re.search(r'https?://[^\s]+', raw_input_text)
-    if match:
-        target_url = match.group(0)
-    else:
-        target_url = ""
-        
-    if not target_url:
-        print("未从输入中提取到有效链接，程序退出。")
-        return
-        
     user_data_dir = os.path.join(os.getcwd(), 'browser_data')
     # 智能检查登录状态
     run_headless = is_logged_in(user_data_dir)
@@ -242,104 +226,149 @@ def main():
         # 挂载网络响应拦截器
         page.on("response", handle_response)
         
-        # 打开目标页面，延长至 60 秒且只要内容加载即可，不再盲目等待完全 networkidle
-        try:
-            page.goto(target_url, timeout=60000, wait_until="domcontentloaded")
-        except Exception as e:
-            print(f"⚠️ 页面加载提示（不影响抓取）: {e}")
-            
-        print("\n等待页面加载...")
-        time.sleep(5)
+        is_first_run = True
         
-        # 判断是否跳转到了单视频页面
-        if "/video/" in page.url or "/note/" in page.url:
-            print("检测到单视频详情页，直接下载作品...")
-            match = re.search(r'/(?:video|note)/(\d+)', page.url)
-            if match:
-                aweme_id = match.group(1)
-                try:
-                    data = page.evaluate(f"""async () => {{
-                        const res = await fetch('/aweme/v1/web/aweme/detail/?device_platform=webapp&aid=6383&channel=channel_pc_web&aweme_id={aweme_id}');
-                        return await res.json();
-                    }}""")
-                    if data and "aweme_detail" in data:
-                        process_aweme_item(data["aweme_detail"], is_single=True)
-                    else:
-                        print("未找到 aweme_detail 数据。")
-                except Exception as e:
-                    print(f"获取单视频数据失败: {e}")
+        while True:
+            if len(sys.argv) > 1 and is_first_run:
+                raw_input_text = sys.argv[1]
+                is_first_run = False
+                single_run = True
             else:
-                print("无法从 URL 提取视频 ID。")
-            
-            context.close()
-            executor.shutdown(wait=True)
-            print("单视频抓取任务结束！")
-            return
-            
-        print("\n检测到主页链接，开始配置筛选条件...")
-        global FILTER_KEYWORD, START_DATETIME, END_DATETIME
-        
-        FILTER_KEYWORD = input("请输入筛选关键字 (仅下载包含该关键字的作品，直接回车不过滤): ").strip()
-        
-        start_str = input("请输入开始日期时间 (格式: YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS，直接回车不限制): ").strip()
-        START_DATETIME = parse_datetime_input(start_str, is_end=False)
-        
-        end_str = input("请输入结束日期时间 (格式: YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS，直接回车不限制): ").strip()
-        END_DATETIME = parse_datetime_input(end_str, is_end=True)
-        
-        print(f"\n准备开始全自动向下滚动主页: {target_url}")
-        print("--------------------------------------------------")
-        print("[当前设置的过滤条件]")
-        print(f"  - 关键字: {FILTER_KEYWORD if FILTER_KEYWORD else '无'}")
-        print(f"  - 开始时间: {START_DATETIME if START_DATETIME else '无'}")
-        print(f"  - 结束时间: {END_DATETIME if END_DATETIME else '无'}")
-        print("--------------------------------------------------")
-        global last_data_time
-        last_data_time = time.time()  # 开始滚动前重置一次时间
-        scroll_count = 0
-        
-        try:
-            # 循环滚到底部，触发懒加载分页
-            while True:
-                scroll_count += 1
-                print(f"\n往下滚动加载中 (第 {scroll_count} 拨)... ⭐ 觉得够了随时可以按 Ctrl+C 提前停止！")
-                
-                # 舍弃可能因为焦点丢失而失效的键盘 PageDown，改用纯鼠标滚轮 + 容器定向滑动双保险！
-                
-                # 保险1：模拟真实的鼠标滚轮向下大幅度猛拨
-                viewport = page.viewport_size
-                if viewport:
-                    page.mouse.move(viewport['width'] / 2, viewport['height'] / 2)
-                for _ in range(3):
-                    page.mouse.wheel(0, 3000)
-                    time.sleep(0.5)
-
-                # 保险2：强制获取抖音用来装载视频瀑布流的内部路由容器，直接给它灌输滑动位移
-                page.evaluate("""() => {
-                    const cont = document.querySelector('.route-scroll-container') || window;
-                    if (cont && cont.scrollBy) {
-                        cont.scrollBy(0, 5000);
-                    }
-                }""")
-                time.sleep(2) # 等待列表新一批内容刷出
-                
-                # 彻底抛弃 DOM 高度判断！改用完美的网络数据包接收时间判断。
-                # 如果超过 15 秒都没监听到任何新的带有 aweme_list 的有效数据流，说明真到底了。
-                idle_time = time.time() - last_data_time
-                if idle_time > 15:
-                    print("🎉 检测到连续 15 秒没有任何新作品数据入账。数据已经到底啦！")
+                raw_input_text = input("\n请输入你想爬取的抖音主页链接或包含单视频链接的文本 (输入 exit 或 q 退出): ").strip()
+                if raw_input_text.lower() in ['exit', 'quit', 'q']:
+                    print("程序已退出。")
                     break
+                single_run = False
+                
+            # 从文本中提取 URL
+            match = re.search(r'https?://[^\s]+', raw_input_text)
+            if match:
+                target_url = match.group(0)
+            else:
+                target_url = ""
+                
+            if not target_url:
+                print("⚠️ 未从输入中提取到有效链接，请重新输入。")
+                if single_run:
+                    break
+                continue
+                
+            print(f"\n正在打开链接: {target_url} ...")
+            # 打开目标页面，延长至 60 秒且只要内容加载即可，不再盲目等待完全 networkidle
+            try:
+                page.goto(target_url, timeout=60000, wait_until="domcontentloaded")
+            except Exception as e:
+                print(f"⚠️ 页面加载提示（不影响抓取）: {e}")
+                
+            print("\n等待页面加载...")
+            time.sleep(5)
+            
+            # 判断是否跳转到了单视频页面
+            if "/video/" in page.url or "/note/" in page.url:
+                print("检测到单视频详情页，直接下载作品...")
+                match = re.search(r'/(?:video|note)/(\d+)', page.url)
+                if match:
+                    aweme_id = match.group(1)
+                    try:
+                        data = page.evaluate(f"""async () => {{
+                            const res = await fetch('/aweme/v1/web/aweme/detail/?device_platform=webapp&aid=6383&channel=channel_pc_web&aweme_id={aweme_id}');
+                            return await res.json();
+                        }}""")
+                        if data and "aweme_detail" in data:
+                            process_aweme_item(data["aweme_detail"], is_single=True)
+                        else:
+                            print("未找到 aweme_detail 数据。")
+                    except Exception as e:
+                        print(f"获取单视频数据失败: {e}")
                 else:
-                    print(f"数据持续流入中 (最后一次收到数据是在 {int(idle_time)} 秒前)...")
-        except KeyboardInterrupt:
-            print("\n⚠️ 收到中止指令！正在安全退出，您已抓取的数据均已自动保存... ⚠️")
+                    print("无法从 URL 提取视频 ID。")
+                
+                # 等待当前单视频的下载线程完成
+                if active_futures:
+                    print(f"正在下载视频，等待完成...")
+                    concurrent.futures.wait(active_futures)
+                    active_futures.clear()
+                    print("🎉 下载成功！")
+                
+                if single_run:
+                    break
+                continue
+                
+            print("\n检测到主页链接，开始配置筛选条件...")
+            global FILTER_KEYWORD, START_DATETIME, END_DATETIME
+            
+            FILTER_KEYWORD = input("请输入筛选关键字 (仅下载包含该关键字的作品，直接回车不过滤): ").strip()
+            
+            start_str = input("请输入开始日期时间 (格式: YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS，直接回车不限制): ").strip()
+            START_DATETIME = parse_datetime_input(start_str, is_end=False)
+            
+            end_str = input("请输入结束日期时间 (格式: YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS，直接回车不限制): ").strip()
+            END_DATETIME = parse_datetime_input(end_str, is_end=True)
+            
+            print(f"\n准备开始全自动向下滚动主页: {target_url}")
+            print("--------------------------------------------------")
+            print("[当前设置的过滤条件]")
+            print(f"  - 关键字: {FILTER_KEYWORD if FILTER_KEYWORD else '无'}")
+            print(f"  - 开始时间: {START_DATETIME if START_DATETIME else '无'}")
+            print(f"  - 结束时间: {END_DATETIME if END_DATETIME else '无'}")
+            print("--------------------------------------------------")
+            
+            global last_data_time
+            last_data_time = time.time()  # 开始滚动前重置一次时间
+            scroll_count = 0
+            
+            try:
+                # 循环滚到底部，触发懒加载分页
+                while True:
+                    scroll_count += 1
+                    print(f"\n往下滚动加载中 (第 {scroll_count} 拨)... ⭐ 觉得够了随时可以按 Ctrl+C 提前停止！")
+                    
+                    # 物理滚轮与JS滑动
+                    viewport = page.viewport_size
+                    if viewport:
+                        page.mouse.move(viewport['width'] / 2, viewport['height'] / 2)
+                    for _ in range(3):
+                        page.mouse.wheel(0, 3000)
+                        time.sleep(0.5)
+    
+                    page.evaluate("""() => {
+                        const cont = document.querySelector('.route-scroll-container') || window;
+                        if (cont && cont.scrollBy) {
+                            cont.scrollBy(0, 5000);
+                        }
+                    }""")
+                    time.sleep(2) # 等待列表新一批内容刷出
+                    
+                    idle_time = time.time() - last_data_time
+                    if idle_time > 15:
+                        print("🎉 检测到连续 15 秒没有任何新作品数据入账。数据已经到底啦！")
+                        break
+                    else:
+                        print(f"数据持续流入中 (最后一次收到数据是在 {int(idle_time)} 秒前)...")
+            except KeyboardInterrupt:
+                print("\n⚠️ 收到中止指令！正在安全退出，您已抓取的数据均已自动保存... ⚠️")
+            
+            print("网页浏览完毕，等候所有后台下载任务完成...")
+            if active_futures:
+                print(f"正在等待当前批次的 {len(active_futures)} 个下载任务完成...")
+                concurrent.futures.wait(active_futures)
+                active_futures.clear()
+            print("主页抓取任务完成！")
+            
+            if single_run:
+                break
         
-        print("网页浏览完毕，等候所有后台下载任务完成...")
+        # 退出循环后关闭 context
         context.close()
         
-        # 等待线程池中的下载任务全部完成
-        executor.shutdown(wait=True)
-        print("全部抓取任务结束！")
+    # 关闭全局线程池
+    executor.shutdown(wait=True)
+    print("全部抓取任务结束！")
+
+DOWNLOAD_DIR = "downloads"
+
+if not os.path.exists(DOWNLOAD_DIR):
+    os.makedirs(DOWNLOAD_DIR)
 
 if __name__ == "__main__":
     main()
