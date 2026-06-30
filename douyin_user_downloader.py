@@ -246,6 +246,34 @@ def main():
         # 挂载网络响应拦截器
         page.on("response", handle_response)
         
+        # 如果没有检测到历史登录，先引导打开抖音首页进行扫码登录
+        if not run_headless:
+            print("💡 请在弹出的浏览器窗口中完成扫码登录，登录成功后程序会自动继续...")
+            try:
+                page.goto("https://www.douyin.com/", timeout=60000)
+            except Exception as e:
+                print(f"⚠️ 打开登录页面提示: {e}")
+                
+            login_success = False
+            for i in range(120):
+                time.sleep(1)
+                cookies = context.cookies()
+                for cookie in cookies:
+                    if cookie['name'] in ['sessionid', 'sessionid_ss', 'passport_csrf_token']:
+                        login_success = True
+                        break
+                if login_success:
+                    print("🎉 检测到登录成功！正在为您进入抓取流程...")
+                    time.sleep(2)  # 给Cookie写入和跳转留出缓冲时间
+                    break
+                if (i + 1) % 10 == 0:
+                    print(f"  [提示] 仍在等待扫码登录中 (已等待 {i + 1} 秒，限时 120 秒)...")
+            
+            if not login_success:
+                print("❌ 扫码登录超时或未检测到登录状态，程序退出。")
+                context.close()
+                return
+                
         is_first_run = True
         
         while True:
